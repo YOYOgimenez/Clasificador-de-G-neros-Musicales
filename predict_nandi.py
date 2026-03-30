@@ -84,8 +84,3 @@ def ejecutar_nandi_completo(link_spotify):
         
     except Exception as e:
         print(f" Error crítico en la predicción: {e}")
-
-if __name__ == "__main__":
-    # Probamos con un link real para validar el sistema
-    LINK_PRUEBA = "https://open.spotify.com/intl-es/track/41sGGCCoHI2GLV9qadX80A?si=b3f1e1262b4f4cd3" 
-    ejecutar_nandi_completo(LINK_PRUEBA)

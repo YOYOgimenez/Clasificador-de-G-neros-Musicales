@@ -9,9 +9,8 @@ import tensorflow as tf
 import pandas as pd
 
 # --- CONFIGURACIÓN DE RUTAS DINÁMICAS ---
-# Esto ayuda a que el servidor de Streamlit encuentre las carpetas 'models' y 'src'
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_DIR = os.path.dirname(CURRENT_DIR) # Sube un nivel desde 'app/' a la raíz
+BASE_DIR = os.path.dirname(CURRENT_DIR)
 
 if BASE_DIR not in sys.path:
     sys.path.append(BASE_DIR)
@@ -20,18 +19,16 @@ from predict_nandi import extraer_segmento_unificado, GENRES
 from src.spotify_recommend import descargar_audio_nandi
 from src.nandi_history import registrar_prediccion
 
-# Nombre exacto del modelo que vimos en tu captura
 MODEL_FILENAME = "v2_improved_model_best.h5"
 
 st.set_page_config(page_title="Nandi AI Live", page_icon="🎷")
 
 st.title("🎷 Nandi AI: Clasificación de Géneros Musicales")
 st.markdown("""
-    Esta herramienta utiliza **Redes Neuronales Convolucionales (CNN)**.
-    Si el enlace de Spotify falla por restricciones de red, **subí el MP3 directamente**.
+    Esta herramienta utiliza **Redes Neuronales Convolucionales (CNN)** para identificar géneros.
+    *Nota: Si el enlace de Spotify falla por restricciones de red (Error 403), subí el MP3 directamente.*
 """)
 
-# --- SELECTOR DE ENTRADA ---
 metodo = st.radio("Seleccioná el método:", ["Enlace de Spotify", "Subir archivo MP3/WAV"])
 
 link_input = None
@@ -59,27 +56,25 @@ if st.button("Analizar con Nandi"):
             cancion = archivo_subido.name
             artista = "Carga Manual"
 
-        # 2. CARGA DEL MODELO (RUTA BLINDADA)
+        # 2. CARGA DEL MODELO (CON PARCHE DE COMPATIBILIDAD)
         if ruta_temp and os.path.exists(ruta_temp):
             try:
-                # Intentamos 3 rutas posibles para no fallar
                 posibles_rutas = [
                     os.path.join(BASE_DIR, "models", MODEL_FILENAME),
                     os.path.join(CURRENT_DIR, "..", "models", MODEL_FILENAME),
                     f"models/{MODEL_FILENAME}"
                 ]
                 
-                path_final_modelo = None
-                for p in posibles_rutas:
-                    if os.path.exists(p):
-                        path_final_modelo = p
-                        break
+                path_final_modelo = next((p for p in posibles_rutas if os.path.exists(p)), None)
                 
                 if not path_final_modelo:
                     st.error(f"🚨 No se encuentra el archivo {MODEL_FILENAME} en la carpeta 'models'.")
                     st.stop()
 
-                model = tf.keras.models.load_model(path_final_modelo)
+                # --- EL PARCHE PARA EL ERROR DE DESERIALIZACIÓN ---
+                # Cargamos sin compilar para evitar el error de 'quantization_config'
+                model = tf.keras.models.load_model(path_final_modelo, compile=False)
+                # --------------------------------------------------
                 
                 # 3. PREDICCIÓN
                 puntos = [10, 25, 45]
@@ -127,7 +122,7 @@ if st.button("Analizar con Nandi"):
 
                     registrar_prediccion("Web", cancion, artista, genero_detectado.lower(), confianza, resultados)
                 else:
-                    st.error("No se pudo procesar el contenido del audio.")
+                    st.error("No se pudo procesar el audio.")
 
             except Exception as e:
                 st.error(f"Error técnico en el modelo: {e}")
@@ -135,4 +130,4 @@ if st.button("Analizar con Nandi"):
             st.error("No se pudo obtener el audio para analizar.")
 
 st.divider()
-st.caption("Nandi AI Project - Joel Gimenez | UBA Data Science student")
+st.caption("Nandi AI Project - Joel Gimenez | UBA Data Science")

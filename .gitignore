@@ -14,7 +14,6 @@ metadata/
 *.mp3   
 
 # Modelos 
-models/*.h5
 models/*.csv
 
 # Gráficos y Reportes

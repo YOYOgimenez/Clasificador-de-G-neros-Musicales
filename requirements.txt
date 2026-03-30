@@ -1,21 +1,11 @@
-# --- INTERFAZ WEB ---
 streamlit
-
-# --- NÚCLEO IA (Versión liviana para Cloud) ---
-tensorflow-cpu>=2.16.1
-librosa>=0.10.0
-numpy>=1.23.5
-pandas>=1.5.3
-scikit-learn>=1.2.2
-keras==3.3.3
-
-# --- GRÁFICOS ---
-matplotlib>=3.7.1
-seaborn>=0.12.2
-
-# --- DESCARGA  ---
+tensorflow-cpu==2.15.0
+librosa
+numpy<2.0.0
+pandas
+scikit-learn
+matplotlib
+seaborn
 spotipy
-yt-dlp 
-
-# -- Llamada --- 
+yt-dlp
 requests

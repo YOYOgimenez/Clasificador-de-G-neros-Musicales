@@ -4,12 +4,14 @@ from spotipy.oauth2 import SpotifyClientCredentials
 import yt_dlp
 
 def configurar_spotify():
-    """Configura la conexión oficial con la API de Spotify"""
+    """Configura la conexión oficial con la API de Spotify usando Secrets de Streamlit"""
+    # En Streamlit Cloud, os.getenv saca los datos de la pestaña 'Secrets' automáticamente
     client_id = os.getenv('SPOTIPY_CLIENT_ID')
     client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
     
     if not client_id or not client_secret:
-        print("⚠️ Error: No se encontraron las credenciales en el archivo .env")
+        # Quitamos la mención al archivo .env para no confundir en la nube
+        print("⚠️ Error: No se encontraron las credenciales de Spotify en los Secrets.")
         return None
         
     auth_manager = SpotifyClientCredentials(
@@ -21,35 +23,35 @@ def configurar_spotify():
 def descargar_audio_nandi(track_url):
     """
     Nandi AI: Obtiene info de Spotify y descarga el audio real 
-    usando yt-dlp para evitar restricciones de 404 o previews.
+    usando yt-dlp con 'disfraz' para evitar el Error 403.
     """
     try:
         sp = configurar_spotify()
+        if not sp:
+            return None, None, None
         
-        # 1. Intentamos sacar la info de Spotify (con limpieza de ID)
+        # 1. Intentamos sacar la info de Spotify
         try:
-            # Extraemos el ID del track limpiando cualquier parámetro extra
             track_id = track_url.split('track/')[-1].split('?')[0]
             track_info = sp.track(track_id)
             nombre = track_info['name']
             artista = track_info['artists'][0]['name']
             busqueda = f"{nombre} {artista} audio"
         except Exception as e:
-            # Si Spotify falla (error 404), usamos una búsqueda genérica de seguridad
             print(f"⚠️ Spotify API no reconoce el link, usando búsqueda de emergencia...")
-            nombre, artista = "Lamento Boliviano", "Enanitos Verdes"
-            busqueda = f"{nombre} {artista} audio"
+            nombre, artista = "Unknown", "Artist"
+            busqueda = track_url # Usamos el link directo si la API falla
 
-        print(f"🔍 Nandi AI está procesando: {nombre} - {artista}...")
-
-        # 2. Preparamos la carpeta temporal
+        # 2. Preparamos la carpeta temporal (Path compatible con Linux/Streamlit)
         path_base = 'data/temp/test_nandi_audio'
         if not os.path.exists('data/temp'):
-            os.makedirs('data/temp')
+            os.makedirs('data/temp', exist_ok=True)
 
-        # 3. Configuración de yt-dlp para bajar el audio
+        # 3. Configuración de yt-dlp BLINDADA contra Error 403
         ydl_opts = {
             'format': 'bestaudio/best',
+            # EL DISFRAZ: Esto hace que YouTube crea que sos un Chrome normal
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -57,13 +59,15 @@ def descargar_audio_nandi(track_url):
             }],
             'outtmpl': path_base, 
             'quiet': True,
-            'noplaylist': True
+            'noplaylist': True,
+            'nocheckcertificate': True, # Ignora errores de certificados SSL
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Buscamos en YouTube el audio de la canción de Spotify
             ydl.download([f"ytsearch1:{busqueda}"])
 
-        # Retornamos la ruta, nombre y artista para el modelo de IA
+        # Retornamos la ruta, nombre y artista
         return f"{path_base}.mp3", nombre, artista
 
     except Exception as e:
@@ -76,7 +80,7 @@ def obtener_playlist_por_genero(genero):
         sp = configurar_spotify()
         if not sp: return None
         
-        results = sp.search(q=f"genre: {genero}", type='playlist', limit=1)
+        results = sp.search(q=f"genre:{genero}", type='playlist', limit=1)
         if results['playlists']['items']:
             p = results['playlists']['items'][0]
             return {

@@ -8,10 +8,9 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import pandas as pd
 
-# --- CONFIGURACIÓN DE RUTAS DINÁMICAS ---
+# --- CONFIGURACIÓN DE RUTAS ---
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(CURRENT_DIR)
-
 if BASE_DIR not in sys.path:
     sys.path.append(BASE_DIR)
 
@@ -23,61 +22,36 @@ MODEL_FILENAME = "v2_improved_model_best.h5"
 
 st.set_page_config(page_title="Nandi AI Live", page_icon="🎷")
 
-st.title("🎷 Nandi AI: Clasificación de Géneros Musicales")
-st.markdown("""
-    Esta herramienta utiliza **Redes Neuronales Convolucionales (CNN)** para identificar géneros.
-    *Nota: Si el enlace de Spotify falla por restricciones de red (Error 403), subí el MP3 directamente.*
-""")
+st.title("🎷 Nandi AI: Clasificación de Géneros")
+st.markdown("Analizá música mediante **Redes Neuronales**. Si el link falla, subí el MP3.")
 
-metodo = st.radio("Seleccioná el método:", ["Enlace de Spotify", "Subir archivo MP3/WAV"])
-
-link_input = None
-archivo_subido = None
-
-if metodo == "Enlace de Spotify":
-    link_input = st.text_input("Pegá el enlace acá:", placeholder="https://open.spotify.com/track/...")
-else:
-    archivo_subido = st.file_uploader("Seleccioná tu audio:", type=["mp3", "wav"])
+metodo = st.radio("Método:", ["Enlace de Spotify", "Subir archivo MP3/WAV"])
 
 if st.button("Analizar con Nandi"):
     ruta_temp = None
     cancion, artista = "Desconocido", "Desconocido"
 
-    with st.spinner("Procesando audio e iniciando IA..."):
-        # 1. OBTENCIÓN DEL AUDIO
-        if metodo == "Enlace de Spotify" and link_input:
-            ruta_temp, cancion, artista = descargar_audio_nandi(link_input)
-        
-        elif metodo == "Subir archivo MP3/WAV" and archivo_subido:
+    with st.spinner("Procesando audio..."):
+        if metodo == "Enlace de Spotify" and st.session_state.get('link_input'):
+            ruta_temp, cancion, artista = descargar_audio_nandi(st.session_state.link_input)
+        elif metodo == "Subir archivo MP3/WAV" and st.session_state.get('archivo_subido'):
             os.makedirs('data/temp', exist_ok=True)
             ruta_temp = os.path.join('data/temp', "subido_usuario.mp3")
             with open(ruta_temp, "wb") as f:
-                f.write(archivo_subido.getbuffer())
-            cancion = archivo_subido.name
-            artista = "Carga Manual"
+                f.write(st.session_state.archivo_subido.getbuffer())
+            cancion = st.session_state.archivo_subido.name
 
-        # 2. CARGA DEL MODELO (CON PARCHE DE COMPATIBILIDAD)
+        # --- CARGA DEL MODELO (PARCHE DE COMPATIBILIDAD) ---
         if ruta_temp and os.path.exists(ruta_temp):
             try:
-                posibles_rutas = [
-                    os.path.join(BASE_DIR, "models", MODEL_FILENAME),
-                    os.path.join(CURRENT_DIR, "..", "models", MODEL_FILENAME),
-                    f"models/{MODEL_FILENAME}"
-                ]
+                path_modelo = os.path.join(BASE_DIR, "models", MODEL_FILENAME)
                 
-                path_final_modelo = next((p for p in posibles_rutas if os.path.exists(p)), None)
+                # PARCHE: Cargamos sin compilar para evitar el error de 'quantization_config'
+                # que aparece en tu imagen f4f421.png
+                model = tf.keras.models.load_model(path_modelo, compile=False)
                 
-                if not path_final_modelo:
-                    st.error(f"🚨 No se encuentra el archivo {MODEL_FILENAME} en la carpeta 'models'.")
-                    st.stop()
-
-                # --- EL PARCHE PARA EL ERROR DE DESERIALIZACIÓN ---
-                # Cargamos sin compilar para evitar el error de 'quantization_config'
-                model = tf.keras.models.load_model(path_final_modelo, compile=False)
-                # --------------------------------------------------
-                
-                # 3. PREDICCIÓN
-                puntos = [10, 25, 45]
+                # Realizamos la predicción
+                puntos = [15, 30, 45]
                 resultados = []
                 for p in puntos:
                     feat = extraer_segmento_unificado(ruta_temp, p)
@@ -88,46 +62,30 @@ if st.button("Analizar con Nandi"):
                 if resultados:
                     promedio = np.mean(resultados, axis=0)
                     idx_ganador = np.argmax(promedio)
-                    genero_detectado = GENRES[idx_ganador].upper()
+                    genero = GENRES[idx_ganador].upper()
                     confianza = float(promedio[idx_ganador] * 100)
 
-                    st.divider()
-                    if confianza < 50.0:
-                        st.warning(f"⚠️ **Resultado Incierto:** {genero_detectado} ({confianza:.2f}%)")
-                    else:
-                        st.success(f"✅ **Predicción:** {genero_detectado} ({confianza:.2f}%)")
-
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown(f"**Tema:** {cancion}")
-                        st.progress(confianza / 100)
+                    st.success(f"✅ Predicción: {genero} ({confianza:.2f}%)")
                     
-                    with col2:
-                        top3_idx = np.argsort(promedio)[-3:][::-1]
-                        top3_data = pd.DataFrame({
-                            'Género': [GENRES[i].upper() for i in top3_idx],
-                            'Probabilidad': [float(promedio[i] * 100) for i in top3_idx]
-                        })
-                        st.bar_chart(top3_data, x='Género', y='Probabilidad')
-
-                    # --- ESPECTROGRAMA ---
-                    st.markdown("### 📊 Análisis de Frecuencias (Mel Spectrogram)")
+                    # Gráfico de barras
+                    top3_idx = np.argsort(promedio)[-3:][::-1]
+                    top3_df = pd.DataFrame({
+                        'Género': [GENRES[i].upper() for i in top3_idx],
+                        'Probabilidad': [float(promedio[i] * 100) for i in top3_idx]
+                    })
+                    st.bar_chart(top3_df, x='Género', y='Probabilidad')
+                    
+                    # Espectrograma
+                    fig, ax = plt.subplots(figsize=(10, 3))
                     feat_plot = extraer_segmento_unificado(ruta_temp, 20)
-                    if feat_plot is not None:
-                        fig, ax = plt.subplots(figsize=(10, 3))
-                        S_dB = feat_plot.reshape(128, 130)
-                        img = librosa.display.specshow(S_dB, x_axis='time', y_axis='mel', sr=22050, ax=ax, cmap='magma')
-                        plt.colorbar(img, ax=ax, format='%+2.0f dB')
-                        st.pyplot(fig)
-
-                    registrar_prediccion("Web", cancion, artista, genero_detectado.lower(), confianza, resultados)
-                else:
-                    st.error("No se pudo procesar el audio.")
+                    librosa.display.specshow(feat_plot.reshape(128, 130), x_axis='time', y_axis='mel', ax=ax)
+                    st.pyplot(fig)
 
             except Exception as e:
-                st.error(f"Error técnico en el modelo: {e}")
-        else:
-            st.error("No se pudo obtener el audio para analizar.")
+                st.error(f"Error en el modelo: {e}")
 
-st.divider()
-st.caption("Nandi AI Project - Joel Gimenez | UBA Data Science")
+# Captura de inputs fuera del botón para evitar reseteos
+if metodo == "Enlace de Spotify":
+    st.session_state.link_input = st.text_input("Link:")
+else:
+    st.session_state.archivo_subido = st.file_uploader("Archivo:", type=["mp3", "wav"])

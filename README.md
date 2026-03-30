@@ -13,7 +13,7 @@ Nandi AI es un sistema basado en **Deep Learning** capaz de identificar géneros
 *El modelo presenta una excelente performance en **Metal (87%)** y **Música Clásica (82%)**.*
 
 ### Historial de Entrenamiento
-![Historial](reports/training_history.png)
+![Historial](reports/v2_training_curves.png)
 
 ## 🛠️ Instalación y Uso
 1. Instala las dependencias: `pip install -r requirements.txt`

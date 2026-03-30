@@ -1,11 +1,7 @@
 import os
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
-from dotenv import load_dotenv
 import yt_dlp
-
-# Cargamos las credenciales del archivo .env
-load_dotenv()
 
 def configurar_spotify():
     """Configura la conexión oficial con la API de Spotify"""

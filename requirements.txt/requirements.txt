@@ -1,7 +1,17 @@
-tensorflow>=2.11.0
+# --- INTERFAZ WEB ---
+streamlit
+
+# --- NÚCLEO IA (Versión liviana para Cloud) ---
+tensorflow-cpu>=2.11.0
 librosa>=0.10.0
 numpy>=1.23.5
 pandas>=1.5.3
 scikit-learn>=1.2.2
+
+# --- GRÁFICOS ---
 matplotlib>=3.7.1
 seaborn>=0.12.2
+
+# --- DESCARGA  ---
+spotipy
+yt-dlp 

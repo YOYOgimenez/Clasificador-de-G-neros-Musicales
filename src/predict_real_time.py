@@ -2,71 +2,79 @@ import os
 import librosa
 import numpy as np
 import tensorflow as tf
+from nandi_history import registrar_prediccion # Import directo porque están en la misma carpeta
 
 # --- CONFIGURACIÓN ---
-MODEL_PATH = "models/v2_improved_model_best.h5"
+# Usamos una ruta que funcione si lo lanzas desde la raíz o desde src
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_PATH = os.path.join(BASE_DIR, "models", "v2_improved_model_best.h5")
+
 FILE_TO_PREDICT = r"C:\Users\joel_\Downloads\cancion_de_yt.mp3" 
 
 GENRES = ['blues', 'classical', 'country', 'disco', 'hiphop', 
           'jazz', 'metal', 'pop', 'reggae', 'rock']
 
-def predict_genre(file_path, model):
-    print(f"\n[INFO] Analizando archivo: {os.path.basename(file_path)}")
-    
+def extraer_segmento(file_path, offset_seg):
     try:
-        # 1. Cargar audio (Empezamos en el segundo 45 para saltar la intro)
-        y, sr = librosa.load(file_path, offset=45, duration=30)
+        y, sr = librosa.load(file_path, sr=22050, duration=3, offset=offset_seg)
+        S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128)
+        S_dB = librosa.power_to_db(S)
         
-        # 2. Espectrograma de Mel
-        mel_spec = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128)
-        mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
-        
-        # 3. Normalización Min-Max (Clave para que no se maree con el volumen)
-        min_val = np.min(mel_spec_db)
-        max_val = np.max(mel_spec_db)
-        mel_spec_norm = (mel_spec_db - min_val) / (max_val - min_val + 1e-6)
-        
-        # 4. Ajustar tamaño a (128, 130)
-        if mel_spec_norm.shape[1] > 130:
-            mel_spec_norm = mel_spec_norm[:, :130]
+        if S_dB.shape[1] > 130:
+            S_dB = S_dB[:, :130]
         else:
-            pad_width = 130 - mel_spec_norm.shape[1]
-            mel_spec_norm = np.pad(mel_spec_norm, ((0, 0), (0, pad_width)), mode='constant')
+            S_dB = np.pad(S_dB, ((0, 0), (0, 130 - S_dB.shape[1])), mode='constant')
+            
+        return S_dB.reshape(1, 128, 130, 1)
+    except Exception as e:
+        print(f" Error extrayendo en segundo {offset_seg}: {e}")
+        return None
 
-        # 5. Formatear para el modelo (1, 128, 130, 1)
-        input_data = mel_spec_norm[np.newaxis, ..., np.newaxis]
+def predict_genre_local_pro(file_path):
+    if not os.path.exists(file_path):
+        print(f" El archivo no existe en: {file_path}")
+        return
 
-        # 6. Predicción
-        predictions = model.predict(input_data, verbose=0)
+    print(f"\n Nandi AI iniciando análisis profundo de: {os.path.basename(file_path)}")
+
+    try:
+        model = tf.keras.models.load_model(MODEL_PATH)
         
-        # 7. REPORTE DE RESULTADOS
-        predicted_idx = np.argmax(predictions[0])
-        confidence = predictions[0][predicted_idx] * 100
-        
-        print("\n" + "="*40)
-        print("       ANÁLISIS DEL MODELO")
-        print("="*40)
-        print(f" GÉNERO PREDICHO: {GENRES[predicted_idx].upper()}")
-        print(f" CONFIANZA:       {confidence:.2f}%")
-        print("="*40)
-        
-        print("\nProbabilidades por categoría:")
-        # Ordenamos de mayor a menor probabilidad
-        sorted_indices = np.argsort(predictions[0])[::-1]
-        for i in sorted_indices:
-            prob = predictions[0][i] * 100
-            if prob > 0.1: # Solo mostramos los que tienen algo de chance
-                print(f" - {GENRES[i].capitalize()}: {prob:.2f}%")
+        puntos_de_analisis = [10, 25, 45]
+        predicciones_acumuladas = []
+
+        for p in puntos_de_analisis:
+            feat = extraer_segmento(file_path, p)
+            if feat is not None:
+                preds = model.predict(feat, verbose=0)
+                predicciones_acumuladas.append(preds[0])
+
+        if not predicciones_acumuladas:
+            print(" No se pudo procesar ningún fragmento del audio.")
+            return
+
+        promedio_final = np.mean(predicciones_acumuladas, axis=0)
+        idx_ganador = np.argmax(promedio_final)
+        genero_final = GENRES[idx_ganador]
+        confianza_final = promedio_final[idx_ganador] * 100
+
+        # --- FASE DE REGISTRO (LA QUE FALTABA) ---
+        registrar_prediccion(
+            fuente="Local",
+            cancion=os.path.basename(file_path),
+            artista="Archivo Local",
+            genero=genero_final,
+            confianza=confianza_final,
+            scores_individuales=predicciones_acumuladas
+        )
+
+        print("\n" + "--" * 10)
+        print(f"  RESULTADO: {genero_final.upper()}")
+        print(f"  CONFIANZA: {confianza_final:.2f}%")
+        print("--" * 10)
 
     except Exception as e:
-        print(f"\n[ERROR] No se pudo procesar el audio: {e}")
+        print(f" Error crítico en la predicción: {e}")
 
 if __name__ == "__main__":
-    if os.path.exists(FILE_TO_PREDICT):
-        if os.path.exists(MODEL_PATH):
-            model = tf.keras.models.load_model(MODEL_PATH)
-            predict_genre(FILE_TO_PREDICT, model)
-        else:
-            print(f"[ERROR] No se encontró el modelo en {MODEL_PATH}")
-    else:
-        print(f"[ERROR] El archivo de audio no existe en: {FILE_TO_PREDICT}")
+    predict_genre_local_pro(FILE_TO_PREDICT)

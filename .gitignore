@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Datos 
+data/
+processed_data/
+metadata/
+*.npy
+*.wav
+*.mp3   
+
+# Modelos 
+models/*.h5
+models/*.csv
+
+# Gráficos y Reportes
+reports/*.png
+
+# IDEs
+.cursor/
+.vscode/
+.history/
+*.code-workspace
+
+# Ignorar reportes de texto automáticos, pero NO las imágenes
+reports/*.txt
+!reports/confusion_matrix.png
+!reports/training_history.png

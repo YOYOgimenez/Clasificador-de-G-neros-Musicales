@@ -2,7 +2,7 @@ import os
 import librosa
 import numpy as np
 import tensorflow as tf
-from nandi_history import registrar_prediccion # Import directo porque están en la misma carpeta
+from nandi_history import registrar_prediccion 
 
 # --- CONFIGURACIÓN ---
 # Usamos una ruta que funcione si lo lanzas desde la raíz o desde src

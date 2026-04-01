@@ -29,6 +29,7 @@ reports/*.csv
 !reports/confusion_matrix.png
 !reports/v2_training_curves.png
 !reports/training_history.png
+!reports/v4_training_curves.png
 
 # IDEs
 .cursor/

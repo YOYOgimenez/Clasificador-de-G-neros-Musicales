@@ -5,19 +5,30 @@ __pycache__/
 .venv/
 venv/
 
-# Datos 
-data/
+# Credenciales
+.env
+
+# Datos pesados — no subir al repo
 processed_data/
 metadata/
-*.npy
-*.wav
-*.mp3   
+datasets/Data/genres_v4/
+data/
 
-# Modelos 
+# Modelos entrenados (pesados)
+models/*.h5
+models/*.keras
 models/*.csv
 
-# Gráficos y Reportes
-reports/*.png
+# Audio temporal
+*.mp3
+data/temp/
+
+# Reportes automáticos (mantenemos las imágenes importantes)
+reports/*.txt
+reports/*.csv
+!reports/confusion_matrix.png
+!reports/v2_training_curves.png
+!reports/training_history.png
 
 # IDEs
 .cursor/
@@ -25,22 +36,11 @@ reports/*.png
 .history/
 *.code-workspace
 
-# Ignorar reportes de texto automáticos, pero NO las imágenes
-reports/*.txt
-!reports/confusion_matrix.png
-!reports/v2_training_curves.png
-!reports/training_history.png 
-
-# Binarios de FFmpeg
+# Binarios FFmpeg
 bin/
 ffmpeg.exe
 ffplay.exe
 ffprobe.exe
 
-# Credenciales y Cache
-.env
+# Cache
 .cache/
-__pycache__/
-
-# Reportes 
-reports/*.cs

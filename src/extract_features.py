@@ -1,71 +1,91 @@
 import os
-import librosa
+import shutil
 import numpy as np
 import json
 from pathlib import Path
+from nandi_utils import preparar_audio_nandi, N_MELS, N_FRAMES
 
 # --- CONFIGURACIÓN ---
-SAMPLE_RATE = 22050
-TRACK_DURATION = 30  # segundos por canción en GTZAN
-NUM_SEGMENTS = 10    # Dividimos cada canción en 10 partes de 3 seg
-SAMPLES_PER_TRACK = SAMPLE_RATE * TRACK_DURATION
-SAMPLES_PER_SEGMENT = int(SAMPLES_PER_TRACK / NUM_SEGMENTS)
+BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__))).parent
+if not (BASE_DIR / "datasets").exists():
+    BASE_DIR = Path(os.getcwd())
 
-# Rutas 
-BASE_DIR = Path(r"C:\Users\joel_\OneDrive\Desktop\music_genre_classification")
-DATASET_PATH = BASE_DIR / "datasets" / "Data" / "genres_original"
-JSON_PATH = BASE_DIR / "metadata"
-OUTPUT_PATH = BASE_DIR / "processed_data"
+DATASET_PATH = BASE_DIR / "datasets" / "Data" / "genres_v4"
+JSON_PATH    = BASE_DIR / "metadata"
+OUTPUT_PATH  = BASE_DIR / "processed_data"
+
 
 def process_split(split_name):
-    print(f"\n--- Iniciando transformación de: {split_name} ---")
-    
-    # Leer el mapa (JSON)
+    print(f"\n--- 🚀 Extrayendo features de: {split_name.upper()} ---")
+
     json_file = JSON_PATH / f"{split_name}.json"
+    if not json_file.exists():
+        print(f"❌ Error: No se encuentra {json_file}. Corré primero create_split.py")
+        return 0, 0
+
     with open(json_file, "r") as f:
         files_to_process = json.load(f)
 
-    for rel_path in files_to_process:
-        # rel_path es algo como "blues/blues.00000.wav"
-        # En lugar de separar a mano, usamos os.path.split
+    # Limpieza de carpeta de salida para no mezclar datos viejos
+    split_dir = OUTPUT_PATH / split_name
+    if split_dir.exists():
+        print(f"🧹 Limpiando datos viejos en {split_dir}...")
+        shutil.rmtree(split_dir)
+
+    ok_count  = 0
+    err_count = 0
+    total     = len(files_to_process)
+
+    for i, rel_path in enumerate(files_to_process, 1):
         genre, file_name = os.path.split(rel_path)
         input_file = DATASET_PATH / rel_path
 
-        # Crear carpeta de salida: processed_data/train/blues/
+        if not input_file.exists():
+            print(f"\n⚠️  Archivo no encontrado: {input_file}")
+            err_count += 1
+            continue
+
         dest_dir = OUTPUT_PATH / split_name / genre
         dest_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            # 1. Cargar el audio
-            signal, sr = librosa.load(input_file, sr=SAMPLE_RATE)
+            spec = preparar_audio_nandi(str(input_file))
 
-            # 2. Cortar en segmentos y extraer características
-            for s in range(NUM_SEGMENTS):
-                start = SAMPLES_PER_SEGMENT * s
-                finish = start + SAMPLES_PER_SEGMENT
-                
-                # Extraer Espectrograma de Mel
-                mel_spec = librosa.feature.melspectrogram(y=signal[start:finish], 
-                                                         sr=sr, 
-                                                         n_mels=128)
-                # Convertir a escala Logarítmica (como escucha el oído humano)
-                log_mel_spec = librosa.power_to_db(mel_spec)
+            if spec is None:
+                err_count += 1
+                continue
 
-                # 3. Guardar como matriz de numpy (.npy)
-                save_name = f"{file_name.replace('.wav', '')}_seg{s}.npy"
-                np.save(dest_dir / save_name, log_mel_spec)
+            # spec tiene forma (1, 128, 130, 1) → guardamos (128, 130, 1)
+            # Consistente con lo que carga train_model.py
+            feature_matrix = spec[0]   # shape: (N_MELS, N_FRAMES, 1)
 
-            print(f"OK: {file_name}")
+            save_name = file_name.replace(".wav", ".npy")
+            np.save(dest_dir / save_name, feature_matrix)
+            ok_count += 1
 
         except Exception as e:
-            print(f"Error procesando {file_name}: {e}")
+            print(f"\n⚠️  Error en {file_name}: {e}")
+            err_count += 1
+
+        # Progreso en línea
+        if i % 50 == 0 or i == total:
+            print(f"   [{i:4d}/{total}] ✅ ok: {ok_count}  ❌ err: {err_count}", end="\r")
+
+    print(f"\n   Completado → ✅ {ok_count} ok  ❌ {err_count} errores")
+    return ok_count, err_count
+
 
 if __name__ == "__main__":
-    # Creamos la carpeta base si no existe
     OUTPUT_PATH.mkdir(exist_ok=True)
-    
-    # Procesamos los 3 grupos
+
+    total_ok  = 0
+    total_err = 0
+
     for split in ["train", "val", "test"]:
-        process_split(split)
-        
-    print("\n Los Datos están listos en 'processed_data'") 
+        ok, err = process_split(split)
+        total_ok  += ok
+        total_err += err
+
+    print(f"\n✨ Features listos — Total: ✅ {total_ok} guardados  ❌ {total_err} errores")
+    if total_err > 0:
+        print("   Revisá los ⚠️  de arriba para identificar archivos problemáticos.")

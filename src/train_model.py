@@ -2,87 +2,193 @@ import os
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from tensorflow.keras import layers, models, callbacks
-from sklearn.preprocessing import LabelEncoder
+from tensorflow.keras import layers, models, callbacks, regularizers
+from pathlib import Path
 
 # --- CONFIGURACIÓN ---
-DATA_PATH = r"C:\Users\joel_\OneDrive\Desktop\music_genre_classification\processed_data"
-MODEL_NAME = "v2_improved_model" # prueba 2 
+BASE_DIR   = Path(os.getcwd())
+DATA_PATH  = BASE_DIR / "processed_data"
+MODEL_DIR  = BASE_DIR / "models"
+MODEL_NAME = "nandi_v4_final"
 
-def load_data_from_dir(base_path):
+# Semilla global para reproducibilidad
+SEED = 42
+tf.random.set_seed(SEED)
+np.random.seed(SEED)
+
+# Orden estricto compartido con create_split.py
+GENRES_STRICT = ['blues', 'classical', 'country', 'disco', 'hiphop',
+                 'jazz', 'metal', 'pop', 'reggae', 'rock']
+
+
+# ---------------------------------------------------------------------------
+# Carga de datos
+# ---------------------------------------------------------------------------
+
+def cargar_datos(split_name):
+    """Carga todos los .npy de un split en memoria."""
     X, y = [], []
-    genres = sorted(os.listdir(base_path))
-    EXPECTED_SHAPE = (128, 130)
-    for genre in genres:
-        genre_dir = os.path.join(base_path, genre)
-        for npy_file in os.listdir(genre_dir):
-            data = np.load(os.path.join(genre_dir, npy_file))
-            if data.shape == EXPECTED_SHAPE:
-                X.append(data[..., np.newaxis])
-                y.append(genre)
-    return np.array(X), np.array(y)
+    split_path = DATA_PATH / split_name
+    found_genres = []
 
-def build_improved_model(input_shape, num_classes):
+    print(f"📦 Cargando {split_name}...")
+
+    for idx, genre in enumerate(GENRES_STRICT):
+        genre_dir = split_path / genre
+        if not genre_dir.exists():
+            print(f"   ⚠️  Carpeta no encontrada: {genre}")
+            continue
+
+        files = [f for f in os.listdir(genre_dir) if f.endswith(".npy")]
+        if not files:
+            print(f"   ⚠️  Sin archivos en: {genre}")
+            continue
+
+        for npy_file in files:
+            data = np.load(genre_dir / npy_file)   # (128, 130, 1) — ya normalizado
+            X.append(data)
+            y.append(idx)
+
+        found_genres.append((genre, len(files)))
+
+    for genre, count in found_genres:
+        print(f"   {genre:12s} → {count} archivos")
+
+    if not X:
+        return np.array([]), np.array([])
+
+    X = np.array(X, dtype=np.float32)   # (N, 128, 130, 1)
+    y = np.array(y, dtype=np.int32)
+    print(f"   Shape final: {X.shape}  |  Clases: {np.unique(y)}\n")
+    return X, y
+
+
+# ---------------------------------------------------------------------------
+# Arquitectura
+# ---------------------------------------------------------------------------
+
+def build_model(input_shape, num_classes):
+    """
+    CNN con BatchNorm + L2 regularization.
+    Más estable que la versión anterior para datasets pequeños.
+    """
+    reg = regularizers.l2(1e-4)
+
     model = models.Sequential([
-        # Capa 1: Detecta bordes y sonidos simples
-        layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
-        layers.MaxPooling2D((2, 2)),
+        # Bloque 1
+        layers.Conv2D(32, (3, 3), activation='relu', padding='same',
+                      kernel_regularizer=reg, input_shape=input_shape),
         layers.BatchNormalization(),
-
-        # Capa 2: Detecta patrones rítmicos
-        layers.Conv2D(64, (3, 3), activation='relu'),
         layers.MaxPooling2D((2, 2)),
-        layers.BatchNormalization(),
+        layers.Dropout(0.25),
 
-        # Capa 3 NUEVA: Detecta estructuras más complejas
-        layers.Conv2D(128, (3, 3), activation='relu'),
+        # Bloque 2
+        layers.Conv2D(64, (3, 3), activation='relu', padding='same',
+                      kernel_regularizer=reg),
+        layers.BatchNormalization(),
         layers.MaxPooling2D((2, 2)),
-        layers.BatchNormalization(),
+        layers.Dropout(0.25),
 
+        # Bloque 3
+        layers.Conv2D(128, (3, 3), activation='relu', padding='same',
+                      kernel_regularizer=reg),
+        layers.BatchNormalization(),
+        layers.MaxPooling2D((2, 2)),
+        layers.Dropout(0.3),
+
+        # Clasificador
         layers.Flatten(),
-        # Aumentamos a 128 neuronas para darle más "capacidad de razonamiento"
-        layers.Dense(128, activation='relu'),
-        layers.Dropout(0.5), # Subimos el Dropout para evitar que se machetee (Overfitting)
+        layers.Dense(256, activation='relu', kernel_regularizer=reg),
+        layers.Dropout(0.5),
         layers.Dense(num_classes, activation='softmax')
-    ])
-    
-    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    ], name="nandi_v4")
+
     return model
 
+
+# ---------------------------------------------------------------------------
+# Entrenamiento
+# ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
-    X_train, y_train_raw = load_data_from_dir(os.path.join(DATA_PATH, "train"))
-    X_val, y_val_raw = load_data_from_dir(os.path.join(DATA_PATH, "val"))
+    MODEL_DIR.mkdir(exist_ok=True)
 
-    le = LabelEncoder()
-    y_train = le.fit_transform(y_train_raw)
-    y_val = le.transform(y_val_raw)
+    # 1. Cargar datos
+    X_train, y_train = cargar_datos("train")
+    X_val,   y_val   = cargar_datos("val")
 
-    model = build_improved_model(X_train.shape[1:], len(le.classes_))
+    if len(X_train) == 0:
+        print("❌ ERROR: No se cargaron datos de entrenamiento. Revisá 'processed_data/train'")
+        exit(1)
 
-    # --- LOS GUARDIANES DEL ENTRENAMIENTO ---
+    # 2. Verificación rápida de rangos (los valores deben estar en [0, 1])
+    print(f"🔍 Verificación de rangos:")
+    print(f"   X_train — min: {X_train.min():.3f}  max: {X_train.max():.3f}  mean: {X_train.mean():.3f}")
+    print(f"   X_val   — min: {X_val.min():.3f}  max: {X_val.max():.3f}  mean: {X_val.mean():.3f}\n")
+
+    # 3. Construir modelo
+    input_shape = X_train.shape[1:]   # (128, 130, 1)
+    model = build_model(input_shape, len(GENRES_STRICT))
+    model.summary()
+
+    # 4. Compilar
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
+    # 5. Callbacks
     checkpoint = callbacks.ModelCheckpoint(
-        f"models/{MODEL_NAME}_best.h5", 
-        monitor='val_accuracy', 
-        save_best_only=True, 
-        mode='max', 
+        filepath=str(MODEL_DIR / f"{MODEL_NAME}_best.h5"),
+        monitor='val_accuracy',
+        save_best_only=True,
+        mode='max',
         verbose=1
     )
-    
+
     early_stop = callbacks.EarlyStopping(
-        monitor='val_loss', 
-        patience=5, # Si por 5 vueltas no mejora, se corta solo
-        restore_best_weights=True
+        monitor='val_loss',
+        patience=15,
+        restore_best_weights=True,
+        verbose=1
     )
+
+    # ReduceLROnPlateau: baja el LR cuando el val_loss se estanca
+    reduce_lr = callbacks.ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,         # LR = LR * 0.5
+        patience=5,
+        min_lr=1e-6,
+        verbose=1
+    )
+
+    # Log de métricas por época en CSV
+    csv_logger = callbacks.CSVLogger(
+        str(MODEL_DIR / f"{MODEL_NAME}_history.csv"), append=False
+    )
+
+    # 6. Entrenar
+    print(f"🚀 Entrenando sobre {len(X_train)} muestras | val: {len(X_val)}")
+    print(f"   Input shape: {input_shape}  |  Clases: {len(GENRES_STRICT)}\n")
 
     history = model.fit(
-        X_train, y_train, 
+        X_train, y_train,
         validation_data=(X_val, y_val),
-        epochs=50, # Tiramos 50 porque el EarlyStop nos cuida
+        epochs=80,
         batch_size=32,
-        callbacks=[checkpoint, early_stop]
+        callbacks=[checkpoint, early_stop, reduce_lr, csv_logger],
+        shuffle=True
     )
 
-    # Guardamos el historial en un CSV para comparar después
-    hist_df = pd.DataFrame(history.history)
-    hist_df.to_csv(f"models/{MODEL_NAME}_history.csv", index=False)
-    print(f"\nEntrenamiento terminado. Historial guardado en models/{MODEL_NAME}_history.csv")
+    # 7. Guardar etiquetas
+    labels_path = MODEL_DIR / f"{MODEL_NAME}_labels.txt"
+    with open(labels_path, "w") as f:
+        f.write("\n".join(GENRES_STRICT))
+    print(f"\n✅ Etiquetas guardadas en {labels_path}")
+
+    # 8. Resumen final
+    best_val_acc = max(history.history.get('val_accuracy', [0]))
+    best_epoch   = history.history.get('val_accuracy', [0]).index(best_val_acc) + 1
+    print(f"\n🏆 Mejor val_accuracy: {best_val_acc:.4f} (época {best_epoch})")
+    print(f"✨ Proceso terminado. Modelo guardado en {MODEL_DIR}/{MODEL_NAME}_best.h5")

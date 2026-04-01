@@ -1,53 +1,89 @@
 import os
-import random
 import json
+import random
 from pathlib import Path
 
-# Configuración de rutas
-BASE_DIR = Path(r"C:\Users\joel_\OneDrive\Desktop\music_genre_classification")
-DATASET_PATH = BASE_DIR / "datasets" / "Data" / "genres_original"
-OUTPUT_PATH = BASE_DIR / "metadata"
+# --- CONFIGURACIÓN DE RUTAS ---
+BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__))).parent
+DATASET_PATH = BASE_DIR / "datasets" / "Data" / "genres_v4"
+JSON_PATH    = BASE_DIR / "metadata"
 
-# Proporciones (80% entrenamiento, 10% validación, 10% testeo)
-TRAIN_PCT = 0.8
-VAL_PCT = 0.1
+# Semilla fija: los splits serán siempre idénticos entre corridas
+RANDOM_SEED = 42
 
-def create_stratified_split():
-    # Diccionarios para guardar los caminos de los archivos
-    splits = {"train": [], "val": [], "test": []}
-    
-    # Listamos las carpetas de géneros
-    genres = [d for d in os.listdir(DATASET_PATH) if os.path.isdir(DATASET_PATH / d)]
-    
-    for genre in genres:
+# Orden estricto compartido con train_model.py
+GENRES_STRICT = ['blues', 'classical', 'country', 'disco', 'hiphop',
+                 'jazz', 'metal', 'pop', 'reggae', 'rock']
+
+
+def create_splits(train_pct=0.8, val_pct=0.1):
+    if not DATASET_PATH.exists():
+        print(f"❌ Error: No se encuentra {DATASET_PATH}. Corré primero augment_v4.py")
+        return
+
+    JSON_PATH.mkdir(exist_ok=True)
+
+    # Limpiamos JSONs viejos para evitar contaminación
+    for old_json in ["train.json", "val.json", "test.json"]:
+        old_path = JSON_PATH / old_json
+        if old_path.exists():
+            old_path.unlink()
+            print(f"🧹 Eliminado {old_json} viejo.")
+
+    data = {"train": [], "val": [], "test": []}
+
+    # Solo procesamos géneros del orden estricto que existan en disco
+    genres_found   = [g for g in GENRES_STRICT if (DATASET_PATH / g).is_dir()]
+    genres_missing = set(GENRES_STRICT) - set(genres_found)
+    if genres_missing:
+        print(f"⚠️  Géneros no encontrados en disco: {sorted(genres_missing)}")
+
+    print(f"🎸 Generando splits para: {genres_found}\n")
+
+    rng = random.Random(RANDOM_SEED)  # RNG aislado → reproducible sin tocar random global
+
+    stats = []
+    for genre in genres_found:
         genre_path = DATASET_PATH / genre
-        # Obtenemos todos los .wav de este género específico
         files = [f"{genre}/{f}" for f in os.listdir(genre_path) if f.endswith(".wav")]
-        
-        # Mezclamos solo los archivos de ESTE género
-        random.seed(42) # Para que siempre nos de el mismo resultado
-        random.shuffle(files)
-        
-        # Calculamos los puntos de corte
-        num_files = len(files)
-        train_idx = int(num_files * TRAIN_PCT)
-        val_idx = int(num_files * (TRAIN_PCT + VAL_PCT))
-        
-        # Repartimos de forma exacta
-        splits["train"].extend(files[0:train_idx])
-        splits["val"].extend(files[train_idx:val_idx])
-        splits["test"].extend(files[val_idx:])
-        
-        print(f"Género '{genre}': {len(files)} archivos repartidos con éxito.")
 
-    # Guardamos los 3 archivos JSON
-    OUTPUT_PATH.mkdir(exist_ok=True)
-    for name, data in splits.items():
-        with open(OUTPUT_PATH / f"{name}.json", "w") as f:
-            json.dump(data, f, indent=4)
-            
-    print("\n Revisá la carpeta 'metadata'.")
+        if not files:
+            print(f"⚠️  Sin archivos .wav en: {genre}")
+            continue
+
+        rng.shuffle(files)
+
+        n       = len(files)
+        n_train = int(n * train_pct)
+        n_val   = int(n * val_pct)
+        n_test  = n - n_train - n_val   # el resto va a test (sin pérdida por redondeo)
+
+        data["train"].extend(files[:n_train])
+        data["val"].extend(files[n_train : n_train + n_val])
+        data["test"].extend(files[n_train + n_val :])
+
+        stats.append((genre, n_train, n_val, n_test))
+
+    # Tabla de resumen
+    print(f"{'Género':12s} | {'Train':>6} | {'Val':>5} | {'Test':>5}")
+    print("-" * 38)
+    for genre, tr, va, te in stats:
+        print(f"{genre:12s} | {tr:>6} | {va:>5} | {te:>5}")
+
+    # Mezclamos los splits globales para que el modelo no vea todos los blues juntos
+    rng.shuffle(data["train"])
+    rng.shuffle(data["val"])
+    rng.shuffle(data["test"])
+
+    print()
+    for split in ["train", "val", "test"]:
+        out_path = JSON_PATH / f"{split}.json"
+        with open(out_path, "w") as f:
+            json.dump(data[split], f, indent=4)
+        print(f"✅ {split}.json → {len(data[split])} archivos")
+
+    print("\n✨ Splits listos. Podés correr extract_features.py")
+
 
 if __name__ == "__main__":
-    create_stratified_split()
-    
+    create_splits()

@@ -3,6 +3,9 @@ import requests  # Importante: para bajar el audio directo de Spotify
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import yt_dlp
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def configurar_spotify():
     """Configura la conexión oficial con la API de Spotify usando Secrets de Streamlit"""
